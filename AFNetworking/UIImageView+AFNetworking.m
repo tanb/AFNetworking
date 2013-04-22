@@ -109,6 +109,27 @@ static char kAFImageRequestOperationObjectKey;
 
         self.af_imageRequestOperation = nil;
     } else {
+        /* Secondary cache check.
+         * This patch was made to supplement AFImageCache. If the request was not hit cache
+         * in AFImageCache based on NSCache, it should check NSURLCache as well.
+         *
+         * This patch made by tanB.
+         */
+        NSCachedURLResponse *cachedResponse =
+          [[NSURLCache sharedURLCache] cachedResponseForRequest:urlRequest];
+        if (cachedResponse && [cachedResponse.data length] > 0){
+            cachedImage = [UIImage imageWithData:cachedResponse.data];
+            [[[self class] af_sharedImageCache] cacheImage:cachedImage forRequest:urlRequest];
+
+            if (success) {
+              success(nil, nil, cachedImage);
+            } else {
+              self.image = cachedImage;
+            }
+
+            self.af_imageRequestOperation = nil;
+            return;
+        }
         self.image = placeholderImage;
 
         AFImageRequestOperation *requestOperation = [[AFImageRequestOperation alloc] initWithRequest:urlRequest];
