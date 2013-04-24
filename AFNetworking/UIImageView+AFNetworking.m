@@ -30,6 +30,7 @@
 @interface AFImageCache : NSObject
 @property (nonatomic) NSString *cacheDirectoryName;
 @property (nonatomic, strong) NSMutableDictionary *memCaches;
+@property (nonatomic) NSInteger diskcacheSize;
 @end
 
 @implementation AFImageCache
@@ -44,6 +45,34 @@
     return _sharedInstance;
 }
 
+- (void)initDiskCacheDirectories
+{
+    NSFileManager *fileManager = [[NSFileManager alloc] init];
+    BOOL isDirectory = NO;
+    BOOL exists = [fileManager fileExistsAtPath:_cacheDirectoryName
+                                    isDirectory:&isDirectory];
+    if (!exists || !isDirectory) {
+        [fileManager createDirectoryAtPath:_cacheDirectoryName
+               withIntermediateDirectories:YES
+                                attributes:nil
+                                     error:nil];
+    }
+    for (int i = 0; i < 16; i++) {
+        for (int j = 0; j < 16; j++) {
+            NSString *subDir =
+            [NSString stringWithFormat:@"%@/%X%X", _cacheDirectoryName, i, j];
+            BOOL isDir = NO;
+            BOOL existsSubDir =
+            [fileManager fileExistsAtPath:subDir isDirectory:&isDir];
+            if (!existsSubDir || !isDir) {
+                [fileManager createDirectoryAtPath:subDir
+                       withIntermediateDirectories:YES
+                                        attributes:nil
+                                             error:nil];
+            }
+        }
+    }
+}
 
 - (id)init
 {
@@ -53,6 +82,8 @@
     NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
     _cacheDirectoryName = [[paths lastObject] stringByAppendingPathComponent:@"Images"];
     _memCaches = @{}.mutableCopy;
+    [self initDiskCacheDirectories];
+    
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
                selector:@selector(removeUnretainedObjects)
@@ -97,9 +128,11 @@
 
 
 - (void)storeData:(NSData *)data URL:(NSString *)URL {
+    if (!data) return;
     NSString *key = [AFImageCache keyForURL:URL];
     // memory cache
     UIImage *image = [UIImage imageWithData:data];
+    if (!image) return;
     [self.memCaches setObject:image forKey:key];
     // disk cache
     [data writeToFile:[self pathForKey:key] atomically:NO];
