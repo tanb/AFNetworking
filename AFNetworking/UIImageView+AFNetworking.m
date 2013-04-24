@@ -23,17 +23,90 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
+#include <fts.h>
+#include <sys/stat.h>
 
 #if defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 #import "UIImageView+AFNetworking.h"
 
-@interface AFImageCache : NSObject
+@interface AFImageCache ()
 @property (nonatomic) NSString *cacheDirectoryName;
 @property (nonatomic, strong) NSMutableDictionary *memCaches;
 @property (nonatomic) NSInteger diskcacheSize;
 @end
 
 @implementation AFImageCache
+
+- (NSUInteger)sizeOfDiskCache
+{
+    NSUInteger size = 0;
+    FTS *fts;
+    FTSENT *entry;
+    char *paths[] = {
+        (char *)[_cacheDirectoryName cStringUsingEncoding:NSUTF8StringEncoding], NULL
+    };
+    fts = fts_open(paths, 0, NULL);
+    while ((entry = fts_read(fts))) {
+        if (entry->fts_info & FTS_DP || entry->fts_level == 0) {
+            // ignore post-order
+            continue;
+        }
+        if (entry->fts_info & FTS_F) {
+            size += entry->fts_statp->st_size;
+        }
+    }
+    fts_close(fts);
+    _diskcacheSize = size;
+    return size;
+}
+
+NSInteger dateModifiedSort(id file1, id file2, void *reverse) {
+    NSDictionary *attrs1 = [[NSFileManager defaultManager] attributesOfItemAtPath:file1 error:nil];
+    NSDictionary *attrs2 = [[NSFileManager defaultManager] attributesOfItemAtPath:file2 error:nil];
+    
+    if ((NSInteger *)reverse == NO) {
+        return [[attrs2 objectForKey:NSFileModificationDate] compare:[attrs1 objectForKey:NSFileModificationDate]];
+    }
+    
+    return [[attrs1 objectForKey:NSFileModificationDate] compare:[attrs2 objectForKey:NSFileModificationDate]];
+}
+
+- (void)cullDiskCache
+{
+    @synchronized(self){
+        [self trimDiskCache];
+    }
+}
+
+- (void)trimDiskCache
+{
+    if ([self sizeOfDiskCache] <= 1024*1024*20) return;
+    
+    int count = 0;
+    int size = 0;
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSError *error = nil;
+    NSString *path = _cacheDirectoryName;
+    
+    NSMutableArray *filteredArray = @[].mutableCopy;
+    for (NSString *filename in [fileManager enumeratorAtPath:_cacheDirectoryName]) {
+        NSString *filepath = [path stringByAppendingPathComponent:filename];
+        NSDictionary *attributes = [fileManager attributesOfItemAtPath:filepath
+                                                                 error:&error];
+        if ([[attributes objectForKey:NSFileType] isEqualToString:NSFileTypeRegular]) {
+            count++;
+            size += [[attributes objectForKey:NSFileSize] intValue];
+            [filteredArray addObject:filepath];
+        }
+    }
+    int reverse = YES;
+    NSMutableArray *sortedDirContents = [NSMutableArray arrayWithArray:[filteredArray sortedArrayUsingFunction:dateModifiedSort context:&reverse]];
+    while (_diskcacheSize > 1024*1024*8 && [sortedDirContents count] > 0) {
+        _diskcacheSize -= [[[[NSFileManager defaultManager] attributesOfItemAtPath:[sortedDirContents lastObject] error:nil] objectForKey:NSFileSize] integerValue];
+        [[NSFileManager defaultManager] removeItemAtPath:[sortedDirContents lastObject] error:nil];
+        [sortedDirContents removeLastObject];
+    }
+}
 
 + (AFImageCache *)sharedImageCache {
     static AFImageCache *_sharedInstance = nil;
@@ -127,7 +200,8 @@
 }
 
 
-- (void)storeData:(NSData *)data URL:(NSString *)URL {
+- (void)storeData:(NSData *)data URL:(NSString *)URL
+{
     if (!data) return;
     NSString *key = [AFImageCache keyForURL:URL];
     // memory cache
