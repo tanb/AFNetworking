@@ -22,14 +22,121 @@
 
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import <CommonCrypto/CommonDigest.h>
 
 #if defined(__IPHONE_OS_VERSION_MIN_REQUIRED)
 #import "UIImageView+AFNetworking.h"
 
-@interface AFImageCache : NSCache
-- (UIImage *)cachedImageForRequest:(NSURLRequest *)request;
-- (void)cacheImage:(UIImage *)image
-        forRequest:(NSURLRequest *)request;
+@interface AFImageCache : NSObject
+@property (nonatomic) NSString *cacheDirectoryName;
+@property (nonatomic, strong) NSMutableDictionary *memCaches;
+@end
+
+@implementation AFImageCache
+
++ (AFImageCache *)sharedImageCache {
+    static AFImageCache *_sharedInstance = nil;
+    static dispatch_once_t oncePredicate;
+    dispatch_once(&oncePredicate, ^{
+        _sharedInstance = [AFImageCache new];
+    });
+    
+    return _sharedInstance;
+}
+
+
+- (id)init
+{
+    self = [super init];
+    if (!self) return nil;
+    NSArray *paths =
+    NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+    _cacheDirectoryName = [[paths lastObject] stringByAppendingPathComponent:@"Images"];
+    _memCaches = @{}.mutableCopy;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    [center addObserver:self
+               selector:@selector(removeUnretainedObjects)
+                   name:UIApplicationDidReceiveMemoryWarningNotification
+                 object:nil];
+    return self;
+}
+
+
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+
+#pragma mark - memCache
+- (void)removeUnretainedObjects
+{
+    for (NSString *key in [self.memCaches allKeys]) {
+        __weak id safeObject = nil;
+        @autoreleasepool {
+            safeObject = [self.memCaches objectForKey:key];
+            [self.memCaches removeObjectForKey:key];
+        }
+        
+        if (safeObject) {
+            [self.memCaches setObject:safeObject forKey:key];
+        }
+    }
+}
+
+
+#pragma mark - diskCache
+- (NSString *)pathForKey:(NSString *)key
+{
+    NSString *path = [NSString stringWithFormat:@"%@/%@/%@",
+                      _cacheDirectoryName,
+                      [key substringToIndex:2],
+                      key];
+    return path;
+}
+
+
+- (void)storeData:(NSData *)data URL:(NSString *)URL {
+    NSString *key = [AFImageCache keyForURL:URL];
+    // memory cache
+    UIImage *image = [UIImage imageWithData:data];
+    [self.memCaches setObject:image forKey:key];
+    // disk cache
+    [data writeToFile:[self pathForKey:key] atomically:NO];
+}
+
+
+- (UIImage *)cachedImageWithURL:(NSString *)URL
+{
+    NSString *key = [AFImageCache keyForURL:URL];
+    // memory cache
+    UIImage *cachedImage = [self.memCaches objectForKey:key];
+    if (cachedImage) {
+        return cachedImage;
+    }
+    
+    // disk cache
+    cachedImage = [UIImage imageWithContentsOfFile:[self pathForKey:key]];
+    if (cachedImage) {
+        // set memory
+        [self.memCaches setObject:cachedImage forKey:key];
+    }
+    
+    return cachedImage;
+}
+
+
++ (NSString *)keyForURL:(NSString *)URL
+{
+	if ([URL length] == 0) {
+		return nil;
+	}
+	const char *cStr = [URL UTF8String];
+	unsigned char result[16];
+	CC_MD5(cStr, (CC_LONG)strlen(cStr), result);
+	return [NSString stringWithFormat:@"%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
+            result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7],result[8], result[9], result[10], result[11],result[12], result[13], result[14], result[15]];
+}
 @end
 
 #pragma mark -
@@ -99,7 +206,9 @@ static char kAFImageRequestOperationObjectKey;
 {
     [self cancelImageRequestOperation];
 
-    UIImage *cachedImage = [[[self class] af_sharedImageCache] cachedImageForRequest:urlRequest];
+    UIImage *cachedImage =
+    [[AFImageCache sharedImageCache] cachedImageWithURL:urlRequest.URL.absoluteString];
+
     if (cachedImage) {
         if (success) {
             success(nil, nil, cachedImage);
@@ -125,7 +234,8 @@ static char kAFImageRequestOperationObjectKey;
                 }
             }
 
-            [[[self class] af_sharedImageCache] cacheImage:responseObject forRequest:urlRequest];
+            [[AFImageCache sharedImageCache] storeData:operation.responseData
+                                                   URL:urlRequest.URL.absoluteString];
         } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
             if ([urlRequest isEqual:[self.af_imageRequestOperation request]]) {
                 if (failure) {
@@ -147,36 +257,6 @@ static char kAFImageRequestOperationObjectKey;
 - (void)cancelImageRequestOperation {
     [self.af_imageRequestOperation cancel];
     self.af_imageRequestOperation = nil;
-}
-
-@end
-
-#pragma mark -
-
-static inline NSString * AFImageCacheKeyFromURLRequest(NSURLRequest *request) {
-    return [[request URL] absoluteString];
-}
-
-@implementation AFImageCache
-
-- (UIImage *)cachedImageForRequest:(NSURLRequest *)request {
-    switch ([request cachePolicy]) {
-        case NSURLRequestReloadIgnoringCacheData:
-        case NSURLRequestReloadIgnoringLocalAndRemoteCacheData:
-            return nil;
-        default:
-            break;
-    }
-
-	return [self objectForKey:AFImageCacheKeyFromURLRequest(request)];
-}
-
-- (void)cacheImage:(UIImage *)image
-        forRequest:(NSURLRequest *)request
-{
-    if (image && request) {
-        [self setObject:image forKey:AFImageCacheKeyFromURLRequest(request)];
-    }
 }
 
 @end
