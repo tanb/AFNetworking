@@ -32,6 +32,7 @@
 @interface AFImageCache : NSObject
 + (AFImageCache *)sharedImageCache;
 - (void)cullDiskCache;
+- (void)removeUnretainedMemCache;
 @end
 
 /**

@@ -159,7 +159,7 @@ NSInteger dateModifiedSort(id file1, id file2, void *reverse) {
     
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
-               selector:@selector(removeUnretainedObjects)
+               selector:@selector(removeUnretainedMemCache)
                    name:UIApplicationDidReceiveMemoryWarningNotification
                  object:nil];
     return self;
@@ -173,7 +173,7 @@ NSInteger dateModifiedSort(id file1, id file2, void *reverse) {
 
 
 #pragma mark - memCache
-- (void)removeUnretainedObjects
+- (void)removeUnretainedMemCache
 {
     for (NSString *key in [self.memCaches allKeys]) {
         __weak id safeObject = nil;
