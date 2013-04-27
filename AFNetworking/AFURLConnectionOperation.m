@@ -741,6 +741,14 @@ didReceiveResponse:(NSURLResponse *)response
 - (void)connection:(NSURLConnection __unused *)connection
     didReceiveData:(NSData *)data
 {
+    long long contentLength;
+    NSDictionary *header = [(NSHTTPURLResponse*)self.response allHeaderFields];
+    if (header && header[@"Content-Length"]) {
+        contentLength = [header[@"Content-Length"] longLongValue];
+    } else {
+        contentLength = self.response.expectedContentLength;
+    }
+
     NSUInteger length = [data length];
     if ([self.outputStream hasSpaceAvailable]) {
         const uint8_t *dataBuffer = (uint8_t *) [data bytes];
@@ -749,9 +757,8 @@ didReceiveResponse:(NSURLResponse *)response
     
     dispatch_async(dispatch_get_main_queue(), ^{
         self.totalBytesRead += length;
-        
         if (self.downloadProgress) {
-            self.downloadProgress(length, self.totalBytesRead, self.response.expectedContentLength);
+            self.downloadProgress(length, self.totalBytesRead, contentLength);
         }
     });
 }
