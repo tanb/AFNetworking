@@ -118,12 +118,12 @@ static char kAFImageRequestOperationObjectKey;
                 
             } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
                 if ([urlRequest isEqual:[self.af_imageRequestOperation request]]) {
-                    if (failure) {
-                        failure(operation.request, operation.response, error);
-                    }
-                    
                     if (self.af_imageRequestOperation == operation) {
                         self.af_imageRequestOperation = nil;
+                    }
+                    
+                    if (failure) {
+                        failure(operation.request, operation.response, error);
                     }
                 }
             }];
