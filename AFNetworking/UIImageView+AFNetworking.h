@@ -73,6 +73,11 @@
  */
 - (void)cancelImageRequestOperation;
 
+/**
+ Shared Image Request Queue.
+ */
++ (NSOperationQueue *)af_sharedImageRequestOperationQueue;
+
 @end
 
 #endif
